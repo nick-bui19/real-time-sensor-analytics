@@ -1,20 +1,21 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import from_json, col
-from pyspark.sql.types import StructType, StringType, IntegerType
+from pyspark.sql.functions import from_json, col, window, avg
+from pyspark.sql.types import StructType, StringType, IntegerType, TimestampType
 
-# Define schema for incoming Kafka data
-schema = StructType() \
-    .add("timestamp", StringType()) \
-    .add("location", StringType()) \
-    .add("sensor_type", StringType()) \
-    .add("value", IntegerType())
-
-# Create Spark session with Kafka support
 spark = SparkSession.builder \
     .appName("TrafficStreamProcessor") \
     .getOrCreate()
 
-# Read stream from Kafka topic
+spark.sparkContext.setLogLevel("WARN")
+
+# Define schema
+schema = StructType() \
+    .add("timestamp", TimestampType()) \
+    .add("location", StringType()) \
+    .add("sensor_type", StringType()) \
+    .add("value", IntegerType())
+
+# Read from Kafka
 df = spark.readStream \
     .format("kafka") \
     .option("kafka.bootstrap.servers", "localhost:9092") \
@@ -22,16 +23,27 @@ df = spark.readStream \
     .option("startingOffsets", "latest") \
     .load()
 
-# Convert Kafka value (bytes) to JSON using our schema
+# Parse and transform
 parsed_df = df.selectExpr("CAST(value AS STRING)") \
     .select(from_json(col("value"), schema).alias("data")) \
-    .select("data.*")
+    .select("data.*") \
+    .filter(col("sensor_type") == "traffic")
 
-# Output to console (for now)
-query = parsed_df.writeStream \
-    .outputMode("append") \
+# Aggregate: avg cars per hour per intersection
+agg_df = parsed_df \
+    .withWatermark("timestamp", "1 hour") \
+    .groupBy(
+        window(col("timestamp"), "1 hour"),
+        col("location")
+    ).agg(
+        avg("value").alias("avg_traffic_count")
+    )
+
+# Print to console
+query = agg_df.writeStream \
+    .outputMode("update") \
     .format("console") \
-    .option("truncate", False) \
+    .option("truncate", "false") \
     .start()
 
 query.awaitTermination()
