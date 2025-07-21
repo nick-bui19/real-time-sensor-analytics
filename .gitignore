@@ -6,6 +6,6 @@ spark-*.tgz
 spark-*/logs/
 .idea/
 .env
-
+dashboard/README.md
 
 settings.local.json
