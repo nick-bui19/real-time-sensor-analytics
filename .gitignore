@@ -6,3 +6,6 @@ spark-*.tgz
 spark-*/logs/
 .idea/
 .env
+
+
+settings.local.json
